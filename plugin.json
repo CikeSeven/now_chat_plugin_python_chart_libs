@@ -1,0 +1,58 @@
+{
+  "id": "python_chart_libs",
+  "name": "Python 图表增强插件",
+  "author": "NowChat",
+  "description": "为模型提供图表处理相关 Python 库能力，并暴露图表专项代码执行工具。",
+  "version": "0.1.0",
+  "type": "python",
+  "pythonNamespace": "python_chart_ui",
+  "providesGlobalPythonPaths": true,
+  "permissions": [
+    "tool:*",
+    "hook:*"
+  ],
+  "packages": [
+    {
+      "id": "python_chart_bundle",
+      "name": "Python Chart Bundle",
+      "description": "图表库插件主包（本地导入模式）。",
+      "version": "0.1.0",
+      "targetDir": ".",
+      "pythonPathEntries": [
+        ".",
+        "libs"
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "name": "python_chart_exec",
+      "description": "执行图表处理 Python 代码并返回 stdout/stderr/产物文件信息。",
+      "runtime": "python_script",
+      "scriptPath": "tools/python_chart_exec.py",
+      "enabledByDefault": true,
+      "timeoutSec": 90,
+      "outputLimit": 24000,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "要执行的 Python 图表处理代码。"
+          }
+        },
+        "required": [
+          "code"
+        ]
+      }
+    }
+  ],
+  "hooks": [
+    {
+      "event": "app_start",
+      "runtime": "python_script",
+      "scriptPath": "hooks/app_start.py",
+      "priority": 5
+    }
+  ]
+}

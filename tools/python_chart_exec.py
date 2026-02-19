@@ -41,6 +41,98 @@ def _detect_chart_libraries() -> Dict[str, str]:
     return summary
 
 
+def _collect_chinese_font_paths() -> List[str]:
+    """收集可用于 matplotlib 的中文字体文件路径。"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    plugin_root = os.path.dirname(script_dir)
+    candidate_dirs = [
+        os.path.join(plugin_root, "assets", "fonts"),
+        os.path.join(plugin_root, "libs", "fonts"),
+        "/system/fonts",
+    ]
+    preferred_names = (
+        "NotoSansCJK",
+        "NotoSansSC",
+        "SourceHanSans",
+        "DroidSansFallback",
+        "MiSans",
+        "PingFang",
+        "simhei",
+        "msyh",
+    )
+    result: List[str] = []
+    seen = set()
+    for folder in candidate_dirs:
+        if not os.path.isdir(folder):
+            continue
+        try:
+            names = os.listdir(folder)
+        except Exception:
+            continue
+        for name in names:
+            lower = name.lower()
+            if not (lower.endswith(".ttf") or lower.endswith(".ttc") or lower.endswith(".otf")):
+                continue
+            if not any(keyword.lower() in lower for keyword in preferred_names):
+                continue
+            full_path = os.path.abspath(os.path.join(folder, name))
+            if full_path in seen:
+                continue
+            seen.add(full_path)
+            result.append(full_path)
+    return result
+
+
+def _setup_matplotlib_chinese() -> str:
+    """配置 matplotlib 中文字体，返回配置摘要。"""
+    matplotlib = _safe_import("matplotlib")
+    if matplotlib is None:
+        return "matplotlib: missing"
+
+    try:
+        matplotlib.use("Agg")
+    except Exception:
+        pass
+
+    font_manager = None
+    try:
+        font_manager = __import__("matplotlib.font_manager", fromlist=["font_manager"])
+    except Exception:
+        font_manager = None
+
+    resolved_names: List[str] = []
+    for font_path in _collect_chinese_font_paths():
+        try:
+            if font_manager is not None:
+                font_manager.fontManager.addfont(font_path)
+                font_name = font_manager.FontProperties(fname=font_path).get_name()
+            else:
+                font_name = ""
+        except Exception:
+            continue
+        if font_name and font_name not in resolved_names:
+            resolved_names.append(font_name)
+
+    # 若未找到可注册字体，则保留一组常见字体名，交给系统字体回退。
+    fallback_names = [
+        "Noto Sans CJK SC",
+        "Noto Sans CJK",
+        "Source Han Sans CN",
+        "Droid Sans Fallback",
+        "sans-serif",
+    ]
+    final_names = resolved_names + [name for name in fallback_names if name not in resolved_names]
+    try:
+        matplotlib.rcParams["font.family"] = ["sans-serif"]
+        matplotlib.rcParams["font.sans-serif"] = final_names
+        matplotlib.rcParams["axes.unicode_minus"] = False
+    except Exception as error:
+        return f"matplotlib font setup failed: {error}"
+    if resolved_names:
+        return f"matplotlib font ready: {resolved_names[0]}"
+    return "matplotlib font fallback ready"
+
+
 def _normalize_chart_files(raw_files: Any) -> List[str]:
     """将 `_chart_files` 统一规范成字符串路径列表。"""
     if not isinstance(raw_files, list):
@@ -142,7 +234,7 @@ def main(payload: Dict[str, Any]) -> Dict[str, Any]:
     matplotlib = _safe_import("matplotlib")
     if matplotlib is not None:
         try:
-            matplotlib.use("Agg")
+            _setup_matplotlib_chinese()
             plt = __import__("matplotlib.pyplot", fromlist=["pyplot"])
         except Exception:
             plt = None

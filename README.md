@@ -10,6 +10,7 @@
 - 插件安装后会把 `libs/` 加入 Python 运行路径。
 - 该插件默认 `providesGlobalPythonPaths=true`，可为其他插件共享图表库路径。
 - `requiredPluginIds=["python_base_libs"]`，安装本插件前需先安装 Python 基础库插件。
+- 中文字体可放在 `assets/fonts/` 或 `libs/fonts/`，插件会在执行前自动尝试加载（matplotlib）。
 
 2. 工具：`python_chart_exec`
 - 供大模型执行图表处理代码（如统计图、趋势图、分组可视化等）。

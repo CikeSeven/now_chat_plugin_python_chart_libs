@@ -51,12 +51,103 @@ class PythonChartLibsConfigPage(UiPage):
                 lines.append(f"{name}: FAIL ({error})")
         return "\n".join(lines)
 
+    def _collect_chinese_font_paths(self) -> list[str]:
+        """收集可用于 matplotlib 的中文字体路径。"""
+        schema_dir = os.path.dirname(os.path.abspath(__file__))
+        plugin_root = os.path.dirname(schema_dir)
+        candidate_dirs = [
+            os.path.join(plugin_root, "assets", "fonts"),
+            os.path.join(plugin_root, "libs", "fonts"),
+            "/system/fonts",
+        ]
+        preferred_names = (
+            "NotoSansCJK",
+            "NotoSansSC",
+            "SourceHanSans",
+            "DroidSansFallback",
+            "MiSans",
+            "PingFang",
+            "simhei",
+            "msyh",
+        )
+        result: list[str] = []
+        seen = set()
+        for folder in candidate_dirs:
+            if not os.path.isdir(folder):
+                continue
+            try:
+                names = os.listdir(folder)
+            except Exception:
+                continue
+            for name in names:
+                lower = name.lower()
+                if not (lower.endswith(".ttf") or lower.endswith(".ttc") or lower.endswith(".otf")):
+                    continue
+                if not any(keyword.lower() in lower for keyword in preferred_names):
+                    continue
+                full_path = os.path.abspath(os.path.join(folder, name))
+                if full_path in seen:
+                    continue
+                seen.add(full_path)
+                result.append(full_path)
+        return result
+
+    def _setup_matplotlib_chinese(self) -> str:
+        """配置 matplotlib 中文字体，避免图表中文显示为方块。"""
+        try:
+            import matplotlib
+        except Exception:
+            return "matplotlib: missing"
+
+        try:
+            matplotlib.use("Agg")
+        except Exception:
+            pass
+
+        try:
+            from matplotlib import font_manager
+        except Exception:
+            font_manager = None
+
+        resolved_names: list[str] = []
+        for font_path in self._collect_chinese_font_paths():
+            try:
+                if font_manager is not None:
+                    font_manager.fontManager.addfont(font_path)
+                    font_name = font_manager.FontProperties(fname=font_path).get_name()
+                else:
+                    font_name = ""
+            except Exception:
+                continue
+            if font_name and font_name not in resolved_names:
+                resolved_names.append(font_name)
+
+        fallback_names = [
+            "Noto Sans CJK SC",
+            "Noto Sans CJK",
+            "Source Han Sans CN",
+            "Droid Sans Fallback",
+            "sans-serif",
+        ]
+        final_names = resolved_names + [name for name in fallback_names if name not in resolved_names]
+        try:
+            matplotlib.rcParams["font.family"] = ["sans-serif"]
+            matplotlib.rcParams["font.sans-serif"] = final_names
+            matplotlib.rcParams["axes.unicode_minus"] = False
+        except Exception as error:
+            return f"matplotlib font setup failed: {error}"
+        if resolved_names:
+            return f"matplotlib font ready: {resolved_names[0]}"
+        return "matplotlib font fallback ready"
+
     def _execute_python_code(self, code: str) -> str:
         """在页面内执行图表处理代码并输出结果。"""
         text = (code or "").strip()
         if not text:
             return "请输入 Python 图表代码。"
 
+        # 执行用户代码前先配置中文字体，避免中文标题/坐标轴渲染异常。
+        font_setup_message = self._setup_matplotlib_chinese()
         output_dir = os.path.join(os.getcwd(), "chart_outputs")
         os.makedirs(output_dir, exist_ok=True)
         stdout_buffer = io.StringIO()
@@ -81,6 +172,8 @@ class PythonChartLibsConfigPage(UiPage):
         result_data = local_scope.get("_result")
         chart_files = local_scope.get("_chart_files")
 
+        if font_setup_message:
+            sections.append(f"[font]\n{font_setup_message}")
         if stdout_text:
             sections.append(f"[stdout]\n{stdout_text}")
         if result_data is not None:

@@ -56,6 +56,12 @@
       "runtime": "python_script",
       "scriptPath": "hooks/app_start.py",
       "priority": 5
+    },
+    {
+      "event": "tool_after_execute",
+      "runtime": "python_script",
+      "scriptPath": "hooks/tool_after_execute.py",
+      "priority": 5
     }
   ]
 }

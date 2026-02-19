@@ -65,21 +65,32 @@ def _collect_chinese_font_paths() -> List[str]:
     for folder in candidate_dirs:
         if not os.path.isdir(folder):
             continue
-        try:
-            names = os.listdir(folder)
-        except Exception:
-            continue
-        for name in names:
-            lower = name.lower()
-            if not (lower.endswith(".ttf") or lower.endswith(".ttc") or lower.endswith(".otf")):
-                continue
-            if not any(keyword.lower() in lower for keyword in preferred_names):
-                continue
-            full_path = os.path.abspath(os.path.join(folder, name))
-            if full_path in seen:
-                continue
-            seen.add(full_path)
-            result.append(full_path)
+        for root, _, files in os.walk(folder):
+            for name in files:
+                lower = name.lower()
+                if not (
+                    lower.endswith(".ttf")
+                    or lower.endswith(".ttc")
+                    or lower.endswith(".otf")
+                ):
+                    continue
+                full_path = os.path.abspath(os.path.join(root, name))
+                if full_path in seen:
+                    continue
+                seen.add(full_path)
+                result.append(full_path)
+    # 按“更像中文字体”的文件名优先，未命中关键词的字体也保留兜底。
+    result.sort(
+        key=lambda path: (
+            0
+            if any(
+                keyword.lower() in os.path.basename(path).lower()
+                for keyword in preferred_names
+            )
+            else 1,
+            os.path.basename(path).lower(),
+        )
+    )
     return result
 
 
@@ -101,7 +112,9 @@ def _setup_matplotlib_chinese() -> str:
         font_manager = None
 
     resolved_names: List[str] = []
+    scanned_font_count = 0
     for font_path in _collect_chinese_font_paths():
+        scanned_font_count += 1
         try:
             if font_manager is not None:
                 font_manager.fontManager.addfont(font_path)
@@ -129,8 +142,11 @@ def _setup_matplotlib_chinese() -> str:
     except Exception as error:
         return f"matplotlib font setup failed: {error}"
     if resolved_names:
-        return f"matplotlib font ready: {resolved_names[0]}"
-    return "matplotlib font fallback ready"
+        return (
+            f"matplotlib font ready: {resolved_names[0]} "
+            f"(scanned={scanned_font_count}, loaded={len(resolved_names)})"
+        )
+    return f"matplotlib font fallback ready (scanned={scanned_font_count})"
 
 
 def _normalize_chart_files(raw_files: Any) -> List[str]:
@@ -286,7 +302,10 @@ def main(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
     exit_code = 0
+    previous_cwd = os.getcwd()
     try:
+        # 将 cwd 暂时切到 output_dir，保证相对路径保存的图片都落在输出目录下。
+        os.chdir(output_dir)
         with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(
             stderr_buffer
         ):
@@ -295,6 +314,10 @@ def main(payload: Dict[str, Any]) -> Dict[str, Any]:
         exit_code = 1
         traceback.print_exc(file=stderr_buffer)
     finally:
+        try:
+            os.chdir(previous_cwd)
+        except Exception:
+            pass
         # 避免 matplotlib 句柄持续堆积。
         if plt is not None:
             try:

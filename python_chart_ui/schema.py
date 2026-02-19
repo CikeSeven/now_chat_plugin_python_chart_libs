@@ -75,21 +75,32 @@ class PythonChartLibsConfigPage(UiPage):
         for folder in candidate_dirs:
             if not os.path.isdir(folder):
                 continue
-            try:
-                names = os.listdir(folder)
-            except Exception:
-                continue
-            for name in names:
-                lower = name.lower()
-                if not (lower.endswith(".ttf") or lower.endswith(".ttc") or lower.endswith(".otf")):
-                    continue
-                if not any(keyword.lower() in lower for keyword in preferred_names):
-                    continue
-                full_path = os.path.abspath(os.path.join(folder, name))
-                if full_path in seen:
-                    continue
-                seen.add(full_path)
-                result.append(full_path)
+            for root, _, files in os.walk(folder):
+                for name in files:
+                    lower = name.lower()
+                    if not (
+                        lower.endswith(".ttf")
+                        or lower.endswith(".ttc")
+                        or lower.endswith(".otf")
+                    ):
+                        continue
+                    full_path = os.path.abspath(os.path.join(root, name))
+                    if full_path in seen:
+                        continue
+                    seen.add(full_path)
+                    result.append(full_path)
+        # 按“更像中文字体”的文件名优先，未命中关键词的字体也保留兜底。
+        result.sort(
+            key=lambda path: (
+                0
+                if any(
+                    keyword.lower() in os.path.basename(path).lower()
+                    for keyword in preferred_names
+                )
+                else 1,
+                os.path.basename(path).lower(),
+            )
+        )
         return result
 
     def _setup_matplotlib_chinese(self) -> str:
@@ -110,7 +121,9 @@ class PythonChartLibsConfigPage(UiPage):
             font_manager = None
 
         resolved_names: list[str] = []
+        scanned_font_count = 0
         for font_path in self._collect_chinese_font_paths():
+            scanned_font_count += 1
             try:
                 if font_manager is not None:
                     font_manager.fontManager.addfont(font_path)
@@ -137,8 +150,11 @@ class PythonChartLibsConfigPage(UiPage):
         except Exception as error:
             return f"matplotlib font setup failed: {error}"
         if resolved_names:
-            return f"matplotlib font ready: {resolved_names[0]}"
-        return "matplotlib font fallback ready"
+            return (
+                f"matplotlib font ready: {resolved_names[0]} "
+                f"(scanned={scanned_font_count}, loaded={len(resolved_names)})"
+            )
+        return f"matplotlib font fallback ready (scanned={scanned_font_count})"
 
     def _execute_python_code(self, code: str) -> str:
         """在页面内执行图表处理代码并输出结果。"""
@@ -159,12 +175,20 @@ class PythonChartLibsConfigPage(UiPage):
             "_chart_files": [],
         }
 
+        previous_cwd = os.getcwd()
         try:
+            # 与工具执行一致，切到 output_dir 以确保相对路径输出稳定。
+            os.chdir(output_dir)
             with contextlib.redirect_stdout(stdout_buffer):
                 with contextlib.redirect_stderr(stderr_buffer):
                     exec(text, {}, local_scope)
         except Exception:
             traceback.print_exc(file=stderr_buffer)
+        finally:
+            try:
+                os.chdir(previous_cwd)
+            except Exception:
+                pass
 
         sections = []
         stdout_text = stdout_buffer.getvalue().strip()

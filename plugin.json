@@ -5,6 +5,9 @@
   "description": "为模型提供图表处理相关 Python 库能力，并暴露图表专项代码执行工具。",
   "version": "0.1.0",
   "type": "python",
+  "requiredPluginIds": [
+    "python_base_libs"
+  ],
   "pythonNamespace": "python_chart_ui",
   "providesGlobalPythonPaths": true,
   "permissions": [

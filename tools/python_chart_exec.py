@@ -174,13 +174,14 @@ def _collect_generated_files(
         seen.add(normalized)
         result.append(normalized)
 
-    # 再补充输出目录中新增的文件，防止用户忘记写 `_chart_files`。
+    # 再补充输出目录中新增的文件（递归），防止用户忘记写 `_chart_files`。
     current_files: List[str] = []
     try:
-        for name in os.listdir(output_dir):
-            full_path = os.path.abspath(os.path.join(output_dir, name))
-            if os.path.isfile(full_path):
-                current_files.append(full_path)
+        for root, _, files in os.walk(output_dir):
+            for name in files:
+                full_path = os.path.abspath(os.path.join(root, name))
+                if os.path.isfile(full_path):
+                    current_files.append(full_path)
     except Exception:
         current_files = []
     before_set = {os.path.abspath(item) for item in before_files}
@@ -190,6 +191,37 @@ def _collect_generated_files(
         seen.add(full_path)
         result.append(full_path)
     return result
+
+
+def _auto_save_open_figures(output_dir: str) -> List[str]:
+    """当模型忘记 savefig 时，自动将当前打开的 figure 导出到输出目录。"""
+    matplotlib = _safe_import("matplotlib")
+    if matplotlib is None:
+        return []
+    try:
+        pyplot = __import__("matplotlib.pyplot", fromlist=["pyplot"])
+        helpers = __import__("matplotlib._pylab_helpers", fromlist=["Gcf"])
+    except Exception:
+        return []
+
+    saved_files: List[str] = []
+    managers = list(getattr(helpers.Gcf, "get_all_fig_managers", lambda: [])() or [])
+    for index, manager in enumerate(managers, start=1):
+        figure = getattr(manager, "canvas", None)
+        figure = getattr(figure, "figure", None)
+        if figure is None:
+            continue
+        file_path = os.path.abspath(os.path.join(output_dir, f"auto_chart_{index}.png"))
+        try:
+            figure.savefig(file_path, dpi=150, bbox_inches="tight")
+            saved_files.append(file_path)
+        except Exception:
+            continue
+    try:
+        pyplot.close("all")
+    except Exception:
+        pass
+    return saved_files
 
 
 def main(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -214,10 +246,11 @@ def main(payload: Dict[str, Any]) -> Dict[str, Any]:
     output_dir = _build_output_dir()
     before_files: List[str] = []
     try:
-        for name in os.listdir(output_dir):
-            full_path = os.path.abspath(os.path.join(output_dir, name))
-            if os.path.isfile(full_path):
-                before_files.append(full_path)
+        for root, _, files in os.walk(output_dir):
+            for name in files:
+                full_path = os.path.abspath(os.path.join(root, name))
+                if os.path.isfile(full_path):
+                    before_files.append(full_path)
     except Exception:
         before_files = []
 
@@ -277,6 +310,15 @@ def main(payload: Dict[str, Any]) -> Dict[str, Any]:
         before_files=before_files,
         declared_files=declared_chart_files,
     )
+    # 若模型未显式保存文件，自动兜底导出当前 figure。
+    if not chart_files:
+        auto_saved = _auto_save_open_figures(output_dir)
+        if auto_saved:
+            chart_files = _collect_generated_files(
+                output_dir=output_dir,
+                before_files=before_files,
+                declared_files=auto_saved,
+            )
     result_value = exec_scope.get("_result")
     libraries = _detect_chart_libraries()
 

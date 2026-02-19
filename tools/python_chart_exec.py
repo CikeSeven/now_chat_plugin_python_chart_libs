@@ -18,7 +18,7 @@ import os
 import traceback
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 
 def _safe_import(module_name: str):
@@ -257,6 +257,117 @@ def _normalize_chart_files(raw_files: Any) -> List[str]:
     return result
 
 
+def _runtime_root_from_output_dir(output_dir: str) -> str:
+    """根据 output_dir 推导插件运行目录根（用于约束绝对路径写入范围）。"""
+    # output_dir 形如: <runtime_root>/chart_outputs/run_xxx
+    return os.path.abspath(os.path.join(output_dir, os.pardir, os.pardir))
+
+
+def _resolve_and_ensure_output_path(path_value: Any, output_dir: str) -> str:
+    """规范化保存路径并确保父目录存在。
+
+    规则:
+    1. 相对路径统一落到 output_dir。
+    2. 绝对路径只允许写入插件 runtime 根目录内部，防止越界写入。
+    3. 对最终路径的父目录执行 mkdir -p。
+    """
+    raw = os.fspath(path_value)
+    if not isinstance(raw, str):
+        raw = str(raw)
+    if not raw.strip():
+        raise ValueError("empty output path")
+
+    # 相对路径统一转换到本次执行输出目录，避免写到不可控位置。
+    if os.path.isabs(raw):
+        target = os.path.abspath(raw)
+    else:
+        target = os.path.abspath(os.path.join(output_dir, raw))
+
+    runtime_root = _runtime_root_from_output_dir(output_dir)
+    # 仅允许落在插件 runtime 目录内，防止越界写入系统路径。
+    if os.path.commonpath([target, runtime_root]) != runtime_root:
+        raise ValueError(
+            f"invalid output path (outside runtime sandbox): {target}"
+        )
+
+    parent = os.path.dirname(target)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    return target
+
+
+def _patch_save_targets(output_dir: str, plt: Any) -> List[Tuple[Any, str, Any]]:
+    """给常见图像保存入口加路径兜底，返回补丁句柄用于恢复。"""
+    patched: List[Tuple[Any, str, Any]] = []
+
+    def _patch_attr(obj: Any, name: str, wrapper_builder):
+        original = getattr(obj, name, None)
+        if original is None:
+            return
+        wrapped = wrapper_builder(original)
+        setattr(obj, name, wrapped)
+        patched.append((obj, name, original))
+
+    # 兜底 matplotlib.pyplot.savefig(path)
+    if plt is not None:
+        def _wrap_pyplot_savefig(original):
+            def _wrapped(*args, **kwargs):
+                if args:
+                    first = args[0]
+                    if isinstance(first, (str, os.PathLike)):
+                        normalized = _resolve_and_ensure_output_path(first, output_dir)
+                        args = (normalized, *args[1:])
+                elif "fname" in kwargs and isinstance(kwargs["fname"], (str, os.PathLike)):
+                    kwargs["fname"] = _resolve_and_ensure_output_path(kwargs["fname"], output_dir)
+                return original(*args, **kwargs)
+
+            return _wrapped
+
+        _patch_attr(plt, "savefig", _wrap_pyplot_savefig)
+
+    # 兜底 matplotlib.figure.Figure.savefig(path)
+    matplotlib_figure = _safe_import("matplotlib.figure")
+    if matplotlib_figure is not None and hasattr(matplotlib_figure, "Figure"):
+        def _wrap_figure_savefig(original):
+            def _wrapped(self, *args, **kwargs):
+                if args:
+                    first = args[0]
+                    if isinstance(first, (str, os.PathLike)):
+                        normalized = _resolve_and_ensure_output_path(first, output_dir)
+                        args = (normalized, *args[1:])
+                elif "fname" in kwargs and isinstance(kwargs["fname"], (str, os.PathLike)):
+                    kwargs["fname"] = _resolve_and_ensure_output_path(kwargs["fname"], output_dir)
+                return original(self, *args, **kwargs)
+
+            return _wrapped
+
+        _patch_attr(matplotlib_figure.Figure, "savefig", _wrap_figure_savefig)
+
+    # 兜底 PIL.Image.Image.save(path)
+    pil_image = _safe_import("PIL.Image")
+    if pil_image is not None and hasattr(pil_image, "Image"):
+        def _wrap_pil_save(original):
+            def _wrapped(self, fp, *args, **kwargs):
+                if isinstance(fp, (str, os.PathLike)):
+                    fp = _resolve_and_ensure_output_path(fp, output_dir)
+                return original(self, fp, *args, **kwargs)
+
+            return _wrapped
+
+        _patch_attr(pil_image.Image, "save", _wrap_pil_save)
+
+    return patched
+
+
+def _restore_patched_methods(patched: List[Tuple[Any, str, Any]]) -> None:
+    """恢复被 patch 的方法，避免影响后续执行上下文。"""
+    for obj, name, original in reversed(patched):
+        try:
+            setattr(obj, name, original)
+        except Exception:
+            continue
+
+
 def _build_output_dir() -> str:
     """为当前执行自动生成独立输出目录。"""
     run_id = uuid.uuid4().hex[:12]
@@ -393,15 +504,26 @@ def main(payload: Dict[str, Any]) -> Dict[str, Any]:
         "sns": sns,
         "plotly": plotly,
         "output_dir": output_dir,
+        # 供模型显式获取安全输出路径使用。
+        "ensure_output_path": lambda path: _resolve_and_ensure_output_path(path, output_dir),
+        # 供模型一行保存图像使用（内部会自动创建父目录）。
+        "savefig_safe": (
+            (lambda path, **kwargs: plt.savefig(_resolve_and_ensure_output_path(path, output_dir), **kwargs))
+            if plt is not None
+            else None
+        ),
         "_result": None,
         "_chart_files": [],
     }
 
     exit_code = 0
     previous_cwd = os.getcwd()
+    patched_methods: List[Tuple[Any, str, Any]] = []
     try:
         # 将 cwd 暂时切到 output_dir，保证相对路径保存的图片都落在输出目录下。
         os.chdir(output_dir)
+        # 在执行用户代码前对保存入口做兜底，处理“目录不存在”的高频错误。
+        patched_methods = _patch_save_targets(output_dir=output_dir, plt=plt)
         with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(
             stderr_buffer
         ):
@@ -410,6 +532,7 @@ def main(payload: Dict[str, Any]) -> Dict[str, Any]:
         exit_code = 1
         traceback.print_exc(file=stderr_buffer)
     finally:
+        _restore_patched_methods(patched_methods)
         try:
             os.chdir(previous_cwd)
         except Exception:
@@ -442,15 +565,31 @@ def main(payload: Dict[str, Any]) -> Dict[str, Any]:
     libraries = _detect_chart_libraries()
 
     ok = exit_code == 0
+    error_line = None
+    if not ok:
+        error_line = stderr_text.strip().splitlines()[0] if stderr_text.strip() else "execution_failed"
+    error_type = None
+    if not ok:
+        lowered = stderr_text.lower()
+        if "filenotfounderror" in lowered or "no such file or directory" in lowered:
+            error_type = "path_not_found"
+        elif "permissionerror" in lowered or "read-only file system" in lowered:
+            error_type = "permission_denied"
+        elif "outside runtime sandbox" in lowered:
+            error_type = "invalid_output_path"
+        else:
+            error_type = "execution_error"
+
     summary = (
         f"python_chart_exec 执行成功，chart_files={len(chart_files)}"
         if ok
-        else "python_chart_exec 执行失败"
+        else f"python_chart_exec 执行失败({error_type})"
     )
     return {
         "ok": ok,
         "summary": summary,
-        "error": None if ok else (stderr_text.strip().splitlines()[0] if stderr_text.strip() else "execution_failed"),
+        "error": None if ok else error_line,
+        "errorType": error_type,
         "stdout": stdout_text,
         "stderr": stderr_text,
         "result": result_value,

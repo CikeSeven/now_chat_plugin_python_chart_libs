@@ -24,9 +24,21 @@ def main(payload: Dict[str, Any]) -> Dict[str, Any]:
     error = data.get("error")
     summary = data.get("summary")
     tool_message_content = data.get("toolMessageContent")
+    tool_ok = None
+    if isinstance(tool_message_content, str):
+        try:
+            parsed = json.loads(tool_message_content)
+            if isinstance(parsed, dict):
+                tool_ok = parsed.get("ok")
+        except Exception:
+            tool_ok = None
+    elif isinstance(tool_message_content, dict):
+        tool_ok = tool_message_content.get("ok")
 
     print(
         "[python_chart_libs] tool_after_execute"
+        " hook_ok=true"
+        f" tool_ok={_to_text(tool_ok)}"
         f" tool={tool_name}"
         f" status={status}"
         f" durationMs={duration_ms}"

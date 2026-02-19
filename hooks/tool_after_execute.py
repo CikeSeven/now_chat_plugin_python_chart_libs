@@ -6,19 +6,17 @@ import json
 from typing import Any, Dict
 
 
-def _safe_to_text(value: Any, max_len: int = 500) -> str:
-    """将任意值转为短文本，避免日志过长。"""
+def _to_text(value: Any) -> str:
+    """将任意值转为文本，保留完整内容用于调试。"""
     try:
         text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
     except Exception:
         text = str(value)
-    if len(text) <= max_len:
-        return text
-    return text[:max_len] + "...(truncated)"
+    return text
 
 
 def main(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Hook 入口：打印工具执行结果摘要与返回值片段。"""
+    """Hook 入口：打印工具执行结果完整内容。"""
     data = payload.get("payload", {}) if isinstance(payload, dict) else {}
     tool_name = str(data.get("toolName", "unknown"))
     status = str(data.get("status", "unknown"))
@@ -32,15 +30,14 @@ def main(payload: Dict[str, Any]) -> Dict[str, Any]:
         f" tool={tool_name}"
         f" status={status}"
         f" durationMs={duration_ms}"
-        f" error={_safe_to_text(error, max_len=200)}"
+        f" error={_to_text(error)}"
     )
     print(
         "[python_chart_libs] tool_after_execute summary="
-        f"{_safe_to_text(summary, max_len=300)}"
+        f"{_to_text(summary)}"
     )
     print(
         "[python_chart_libs] tool_after_execute return="
-        f"{_safe_to_text(tool_message_content, max_len=1000)}"
+        f"{_to_text(tool_message_content)}"
     )
     return {"ok": True}
-

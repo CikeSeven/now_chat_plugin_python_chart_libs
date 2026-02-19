@@ -17,6 +17,7 @@ import io
 import os
 import traceback
 import uuid
+from dataclasses import dataclass
 from typing import Any, Dict, List
 
 
@@ -41,8 +42,68 @@ def _detect_chart_libraries() -> Dict[str, str]:
     return summary
 
 
-def _collect_chinese_font_paths() -> List[str]:
-    """收集可用于 matplotlib 的中文字体文件路径。"""
+@dataclass
+class _FontCandidate:
+    """候选字体信息。"""
+
+    path: str
+    source_order: int
+    preferred_hit: bool
+    supports_cjk: bool
+
+
+def _font_supports_chinese(font_path: str) -> bool:
+    """检测字体是否包含常见中文字符。"""
+    try:
+        from fontTools.ttLib import TTCollection
+        from fontTools.ttLib import TTFont
+    except Exception:
+        return False
+
+    required_chars = ("中", "文", "图", "表", "月")
+    required_codes = {ord(ch) for ch in required_chars}
+
+    def _font_has_required_codes(font_obj: Any) -> bool:
+        cmap_table = getattr(font_obj, "cmap", None)
+        if cmap_table is None:
+            return False
+        covered = set()
+        for table in getattr(cmap_table, "tables", []):
+            cmap = getattr(table, "cmap", None) or {}
+            covered.update(cmap.keys())
+            if required_codes.issubset(covered):
+                return True
+        return False
+
+    try:
+        lower_name = os.path.basename(font_path).lower()
+        if lower_name.endswith(".ttc"):
+            collection = TTCollection(font_path, lazy=True)
+            try:
+                for font_obj in collection.fonts:
+                    if _font_has_required_codes(font_obj):
+                        return True
+            finally:
+                try:
+                    collection.close()
+                except Exception:
+                    pass
+            return False
+
+        font_obj = TTFont(font_path, lazy=True)
+        try:
+            return _font_has_required_codes(font_obj)
+        finally:
+            try:
+                font_obj.close()
+            except Exception:
+                pass
+    except Exception:
+        return False
+
+
+def _collect_chinese_font_candidates() -> List[_FontCandidate]:
+    """收集可用于 matplotlib 的中文字体候选。"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     plugin_root = os.path.dirname(script_dir)
     candidate_dirs = [
@@ -51,6 +112,8 @@ def _collect_chinese_font_paths() -> List[str]:
         "/system/fonts",
     ]
     preferred_names = (
+        "harmony",
+        "hmos",
         "NotoSansCJK",
         "NotoSansSC",
         "SourceHanSans",
@@ -60,9 +123,9 @@ def _collect_chinese_font_paths() -> List[str]:
         "simhei",
         "msyh",
     )
-    result: List[str] = []
+    result: List[_FontCandidate] = []
     seen = set()
-    for folder in candidate_dirs:
+    for source_order, folder in enumerate(candidate_dirs):
         if not os.path.isdir(folder):
             continue
         for root, _, files in os.walk(folder):
@@ -78,17 +141,29 @@ def _collect_chinese_font_paths() -> List[str]:
                 if full_path in seen:
                     continue
                 seen.add(full_path)
-                result.append(full_path)
-    # 按“更像中文字体”的文件名优先，未命中关键词的字体也保留兜底。
+                preferred_hit = any(
+                    keyword.lower() in os.path.basename(full_path).lower()
+                    for keyword in preferred_names
+                )
+                result.append(
+                    _FontCandidate(
+                        path=full_path,
+                        source_order=source_order,
+                        preferred_hit=preferred_hit,
+                        supports_cjk=_font_supports_chinese(full_path),
+                    )
+                )
+
+    # 排序策略：
+    # 1) 先保证“实际支持中文字形”；
+    # 2) 再按命名关键词倾向中文字体；
+    # 3) 再按目录优先级（插件内字体 > 系统字体）。
     result.sort(
-        key=lambda path: (
-            0
-            if any(
-                keyword.lower() in os.path.basename(path).lower()
-                for keyword in preferred_names
-            )
-            else 1,
-            os.path.basename(path).lower(),
+        key=lambda item: (
+            0 if item.supports_cjk else 1,
+            0 if item.preferred_hit else 1,
+            item.source_order,
+            os.path.basename(item.path).lower(),
         )
     )
     return result
@@ -112,9 +187,15 @@ def _setup_matplotlib_chinese() -> str:
         font_manager = None
 
     resolved_names: List[str] = []
+    selected_font_name = ""
+    selected_font_path = ""
     scanned_font_count = 0
-    for font_path in _collect_chinese_font_paths():
+    cjk_ready_count = 0
+    for candidate in _collect_chinese_font_candidates():
+        font_path = candidate.path
         scanned_font_count += 1
+        if candidate.supports_cjk:
+            cjk_ready_count += 1
         try:
             if font_manager is not None:
                 font_manager.fontManager.addfont(font_path)
@@ -125,6 +206,13 @@ def _setup_matplotlib_chinese() -> str:
             continue
         if font_name and font_name not in resolved_names:
             resolved_names.append(font_name)
+        if candidate.supports_cjk and font_name and not selected_font_name:
+            selected_font_name = font_name
+            selected_font_path = font_path
+
+    # 没找到“验证通过”的中文字体时，降级使用第一个成功注册字体。
+    if not selected_font_name and resolved_names:
+        selected_font_name = resolved_names[0]
 
     # 若未找到可注册字体，则保留一组常见字体名，交给系统字体回退。
     fallback_names = [
@@ -136,17 +224,24 @@ def _setup_matplotlib_chinese() -> str:
     ]
     final_names = resolved_names + [name for name in fallback_names if name not in resolved_names]
     try:
-        matplotlib.rcParams["font.family"] = ["sans-serif"]
+        # 关键：优先把 family 指向具体字体名，避免落到 DejaVu Sans 这类无中文字形字体。
+        if selected_font_name:
+            matplotlib.rcParams["font.family"] = [selected_font_name]
+        else:
+            matplotlib.rcParams["font.family"] = ["sans-serif"]
         matplotlib.rcParams["font.sans-serif"] = final_names
         matplotlib.rcParams["axes.unicode_minus"] = False
     except Exception as error:
         return f"matplotlib font setup failed: {error}"
-    if resolved_names:
+    if selected_font_name:
         return (
-            f"matplotlib font ready: {resolved_names[0]} "
-            f"(scanned={scanned_font_count}, loaded={len(resolved_names)})"
+            f"matplotlib font ready: name={selected_font_name}, path={selected_font_path}, "
+            f"scanned={scanned_font_count}, cjkReady={cjk_ready_count}, loaded={len(resolved_names)}"
         )
-    return f"matplotlib font fallback ready (scanned={scanned_font_count})"
+    return (
+        "matplotlib font fallback ready "
+        f"(scanned={scanned_font_count}, cjkReady={cjk_ready_count}, loaded={len(resolved_names)})"
+    )
 
 
 def _normalize_chart_files(raw_files: Any) -> List[str]:
@@ -280,10 +375,11 @@ def main(payload: Dict[str, Any]) -> Dict[str, Any]:
     plotly = _safe_import("plotly")
 
     plt = None
+    font_setup_message = "matplotlib: missing"
     matplotlib = _safe_import("matplotlib")
     if matplotlib is not None:
         try:
-            _setup_matplotlib_chinese()
+            font_setup_message = _setup_matplotlib_chinese()
             plt = __import__("matplotlib.pyplot", fromlist=["pyplot"])
         except Exception:
             plt = None
@@ -362,4 +458,5 @@ def main(payload: Dict[str, Any]) -> Dict[str, Any]:
         "generatedChartFiles": chart_files,
         "libraries": libraries,
         "outputDir": output_dir,
+        "fontSetup": font_setup_message,
     }

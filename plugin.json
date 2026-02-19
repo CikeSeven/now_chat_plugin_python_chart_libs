@@ -30,7 +30,7 @@
   "tools": [
     {
       "name": "python_chart_exec",
-      "description": "执行图表处理 Python 代码并返回 stdout/stderr/产物文件信息。",
+      "description": "执行图表处理 Python 代码并返回 stdout/stderr/产物文件信息。若生成图片，请使用 Markdown 图片语法（如 ![图表](图片路径)）将图片嵌入回复展示给用户。",
       "runtime": "python_script",
       "scriptPath": "tools/python_chart_exec.py",
       "enabledByDefault": true,

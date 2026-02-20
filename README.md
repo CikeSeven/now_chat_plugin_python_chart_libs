@@ -1,63 +1,36 @@
-# Python Chart Libs Plugin
+# Python 图表增强插件
 
-> 这是一个“图表处理增强插件”示例，用于给 NowChat 扩展更多 Python 图表库执行能力。
+该插件用于扩展 NowChat 的图表生成能力，向模型开放 `python_chart_exec` 工具。
 
-## 插件功能说明
-该插件当前提供以下能力：
+## 这个插件能做什么
+- 执行图表相关 Python 代码（如折线图、柱状图、散点图等）。
+- 自动创建本次运行的图表输出目录。
+- 返回图表文件路径，便于在聊天中继续展示或处理。
+- 支持加载中文字体（放入 `libs/fonts/` 后可用于中文图表渲染）。
 
-1. 图表相关基础库路径占位
-- 约定将图表相关 Python 库放入 `libs/` 目录。
-- 插件安装后会把 `libs/` 加入 Python 运行路径。
-- 该插件默认 `providesGlobalPythonPaths=true`，可为其他插件共享图表库路径。
-- `requiredPluginIds=["python_base_libs"]`，安装本插件前需先安装 Python 基础库插件。
-- 中文字体可放在 `assets/fonts/` 或 `libs/fonts/`，插件会在执行前自动尝试加载（matplotlib）。
+## 前置依赖
+- 需要先安装并启用：`python_base_libs`。
+- 未安装前置插件时，当前插件不应安装/启用。
 
-2. 工具：`python_chart_exec`
-- 供大模型执行图表处理代码（如统计图、趋势图、分组可视化等）。
-- 无需传入输出目录，工具会自动生成本次图表输出路径。
-- 返回 `stdout`、`stderr`、`_result`、`generatedChartFiles` 与 `outputDir`。
-- 默认超时已提升，适合中等复杂度图表任务；极长任务建议拆分执行。
-
-3. 插件配置页面
-- 提供“检查图表环境”按钮（检查常见图表库是否可导入）。
-- 提供代码输入框与执行按钮，方便手动验证图表代码。
-
-## 需要准备哪些文件
-必备文件：
-- `plugin.json`：插件定义，包含工具、Hook、UI 命名空间等。
-- `README.md`：插件说明文档。
-- `tools/python_chart_exec.py`：图表执行工具脚本。
-- `hooks/app_start.py`：启动 Hook（可用于启动日志/自检）。
-- `python_chart_ui/schema.py`：插件配置页入口（必须有 `create_page()`）。
-- `python_chart_ui/base.py` 与 `python_chart_ui/__init__.py`：UI DSL 基类与导出入口。
-
-推荐目录：
-- `libs/`：放图表库文件（如 matplotlib/seaborn/plotly 等）。
-- `assets/`：静态资源占位。
-- `runtime/`：运行时临时文件占位。
-
-## 目录结构
-```text
-python_chart_libs_plugin/
-  plugin.json
-  README.md
-  assets/
-    .gitkeep
-  hooks/
-    app_start.py
-  libs/
-    .gitkeep
-  runtime/
-    .gitkeep
-  tools/
-    python_chart_exec.py
-  python_chart_ui/
-    __init__.py
-    base.py
-    schema.py
-```
+## 核心工具
+- `python_chart_exec`
+  - 用途：执行图表处理代码并产出图片。
+  - 返回：执行日志、错误信息、图表文件列表、输出目录等。
+  - 特点：无需手动指定固定输出目录，工具会自动分配本次运行目录。
 
 ## 使用方式
-1. 将 `python_chart_libs_plugin` 目录打包为 zip（zip 根目录必须直接包含 `plugin.json`）。
-2. 在 NowChat 插件中心导入并安装该 zip。
-3. 进入插件配置页先检查环境，再执行图表代码验证能力。
+1. 先安装并启用 `python_base_libs`。
+2. 安装并启用本插件。
+3. 进入插件配置页，先点“检查图表环境”。
+4. 输入图表代码执行，确认能生成图片。
+5. 在聊天中启用工具调用后，模型可自动使用 `python_chart_exec`。
+
+## 适用场景
+- 数据可视化结果生成。
+- 统计图、趋势图、对比图快速输出。
+- 需要将图表路径返回给模型继续处理的任务。
+
+## 注意事项
+- 图表任务通常比普通 Python 任务更重，建议减少一次性超大数据量输入。
+- 若图中中文乱码，请在 `libs/fonts/` 放入可用中文字体并重试。
+- 如果模型代码里自定义保存路径，建议使用相对路径，避免路径越界或保存失败。

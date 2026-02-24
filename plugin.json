@@ -5,11 +5,19 @@
   "description": "为模型提供图表处理相关 Python 库能力，并暴露图表专项代码执行工具。",
   "version": "0.1.0",
   "type": "python",
-  "requiredPluginIds": [
-    "python_base_libs"
-  ],
   "pythonNamespace": "python_chart_ui",
   "providesGlobalPythonPaths": true,
+  "requirements": [
+    "numpy==1.26.2",
+    "pandas==2.1.4",
+    "matplotlib==3.6.0",
+    "seaborn==0.12.0",
+    "plotly==6.5.2",
+    "bokeh==3.6.3",
+    "altair==5.5.0",
+    "pillow==11.3.0",
+    "fonttools==4.61.1"
+  ],
   "permissions": [
     "tool:*",
     "hook:*"
@@ -22,8 +30,7 @@
       "version": "0.1.0",
       "targetDir": ".",
       "pythonPathEntries": [
-        ".",
-        "libs"
+        "."
       ]
     }
   ],

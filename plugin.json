@@ -8,15 +8,15 @@
   "pythonNamespace": "python_chart_ui",
   "providesGlobalPythonPaths": true,
   "requirements": [
-    "numpy==1.26.2",
-    "pandas==2.1.4",
-    "matplotlib==3.6.0",
-    "seaborn==0.12.0",
-    "plotly==6.5.2",
-    "bokeh==3.6.3",
-    "altair==5.5.0",
-    "pillow==11.3.0",
-    "fonttools==4.61.1"
+    "numpy",
+    "pandas",
+    "matplotlib",
+    "seaborn",
+    "plotly",
+    "bokeh",
+    "altair",
+    "pillow",
+    "fonttools"
   ],
   "permissions": [
     "tool:*",

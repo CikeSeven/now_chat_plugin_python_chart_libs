@@ -36,7 +36,7 @@ def main(payload: Dict[str, Any]) -> Dict[str, Any]:
         tool_ok = tool_message_content.get("ok")
 
     print(
-        "[python_chart_libs] tool_after_execute"
+        "[now_chat_plugin_python_chart_libs] tool_after_execute"
         " hook_ok=true"
         f" tool_ok={_to_text(tool_ok)}"
         f" tool={tool_name}"
@@ -45,11 +45,11 @@ def main(payload: Dict[str, Any]) -> Dict[str, Any]:
         f" error={_to_text(error)}"
     )
     print(
-        "[python_chart_libs] tool_after_execute summary="
+        "[now_chat_plugin_python_chart_libs] tool_after_execute summary="
         f"{_to_text(summary)}"
     )
     print(
-        "[python_chart_libs] tool_after_execute return="
+        "[now_chat_plugin_python_chart_libs] tool_after_execute return="
         f"{_to_text(tool_message_content)}"
     )
     return {"ok": True}

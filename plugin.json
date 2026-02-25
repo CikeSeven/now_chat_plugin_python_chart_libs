@@ -1,12 +1,16 @@
 {
-  "id": "python_chart_libs",
+  "id": "now_chat_plugin_python_chart_libs",
   "name": "Python 图表增强插件",
   "author": "NowChat",
-  "description": "为模型提供图表处理相关 Python 库能力，并暴露图表专项代码执行工具。",
+  "description": "为模型提供图表处理相关 Python 库能力（requirements 动态安装），并暴露图表专项代码执行工具。",
   "version": "0.1.0",
   "type": "python",
-  "requiredPluginIds": [
-    "python_base_libs"
+  "requirements": [
+    "numpy",
+    "pandas",
+    "matplotlib",
+    "seaborn",
+    "plotly"
   ],
   "pythonNamespace": "python_chart_ui",
   "providesGlobalPythonPaths": true,
@@ -18,12 +22,11 @@
     {
       "id": "python_chart_bundle",
       "name": "Python Chart Bundle",
-      "description": "图表库插件主包（本地导入模式）。",
+      "description": "图表插件主包（仅脚本与 UI，不再内置第三方库）。",
       "version": "0.1.0",
       "targetDir": ".",
       "pythonPathEntries": [
-        ".",
-        "libs"
+        "."
       ]
     }
   ],

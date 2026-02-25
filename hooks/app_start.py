@@ -3,8 +3,8 @@
 
 def main(payload):
     """应用启动时输出一条轻量调试信息。"""
-    print("[python_chart_libs] app_start hook triggered")
+    print("[now_chat_plugin_python_chart_libs] app_start hook triggered")
     return {
         "ok": True,
-        "summary": "python_chart_libs 已启动",
+        "summary": "now_chat_plugin_python_chart_libs 已启动",
     }

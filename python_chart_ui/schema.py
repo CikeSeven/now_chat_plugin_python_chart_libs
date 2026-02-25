@@ -114,10 +114,20 @@ class PythonChartLibsConfigPage(UiPage):
         """收集可用于 matplotlib 的中文字体候选。"""
         schema_dir = os.path.dirname(os.path.abspath(__file__))
         plugin_root = os.path.dirname(schema_dir)
+        # 重要：
+        # Android 上对 /system/fonts 全量扫描并 addfont，容易在部分机型触发 ft2font 原生崩溃。
+        # 这里不再遍历系统字体目录，只使用：
+        # 1) 插件内字体目录（推荐）
+        # 2) 少量系统白名单字体路径（存在才加入）
         candidate_dirs = [
             os.path.join(plugin_root, "assets", "fonts"),
             os.path.join(plugin_root, "libs", "fonts"),
-            "/system/fonts",
+        ]
+        system_font_whitelist = [
+            "/system/fonts/NotoSansCJK-Regular.ttc",
+            "/system/fonts/NotoSansSC-Regular.otf",
+            "/system/fonts/SourceHanSansCN-Regular.otf",
+            "/system/fonts/DroidSansFallback.ttf",
         ]
         preferred_names = (
             "harmony",
@@ -161,6 +171,25 @@ class PythonChartLibsConfigPage(UiPage):
                             supports_cjk=self._font_supports_chinese(full_path),
                         )
                     )
+
+        # 仅追加系统白名单字体，避免全量扫描系统目录导致 native 崩溃。
+        for full_path in system_font_whitelist:
+            normalized = os.path.abspath(full_path)
+            if normalized in seen or not os.path.isfile(normalized):
+                continue
+            seen.add(normalized)
+            preferred_hit = any(
+                keyword.lower() in os.path.basename(normalized).lower()
+                for keyword in preferred_names
+            )
+            result.append(
+                PythonChartLibsConfigPage._FontCandidate(
+                    path=normalized,
+                    source_order=99,
+                    preferred_hit=preferred_hit,
+                    supports_cjk=self._font_supports_chinese(normalized),
+                )
+            )
 
         # 排序策略：
         # 1) 先保证“实际支持中文字形”；
